@@ -6,7 +6,7 @@ This document defines the GPIO pin assignments and hardware interface configurat
 ## Device Components
 - **RF Receiver:** CC1101 (SPI interface)
 - **RS-485 Driver:** MAX3485 (UART interface)
-- **Status Indicator:** LED (GPIO10)
+- **Status Indicator:** Onboard RGB LED (GPIO8, WS2812B addressable)
 - **Console:** USB Serial (UART0 - dedicated)
 
 ---
@@ -23,9 +23,9 @@ This document defines the GPIO pin assignments and hardware interface configurat
 | GPIO5 | CC1101 | CLK (Clock) | SPI2 CLK | SPI clock signal |
 | GPIO6 | CC1101 | MISO (Master In, Slave Out) | SPI2 MISO | Data from CC1101 to ESP32-C3 |
 | GPIO7 | CC1101 | MOSI (Master Out, Slave In) | SPI2 MOSI | Data from ESP32-C3 to CC1101 |
-| GPIO8 | (Reserved) | SPI Flash CLK | Internal | DO NOT USE - SPI Flash |
+| GPIO8 | (Reserved) | SPI Flash CLK | Internal | **ONBOARD RGB LED (WS2812B) - Use for status** |
 | GPIO9 | (Reserved) | SPI Flash CS | Internal | DO NOT USE - SPI Flash |
-| GPIO10 | LED Status | Output | GPIO | Status indicator (active high) |
+| GPIO10 | (Available) | - | GPIO | Available for other uses |
 | GPIO11 | (Not exposed) | - | - | Not available on Super Mini |
 | GPIO20 | Console (UART0) | RX | UART0 RX | USB serial console (reserved) |
 | GPIO21 | Console (UART0) | TX | UART0 TX | USB serial console (reserved) |
@@ -59,9 +59,7 @@ This document defines the GPIO pin assignments and hardware interface configurat
 ### GPIO Outputs/Inputs
 | GPIO | Component | Signal | Configuration |
 |------|-----------|--------|---|
-| GPIO10 | LED | Status | Output (active high, 220Ω resistor) |
-
-**Note:** GPIO11 (button) is not exposed on ESP32-C3 Super Mini. If user input is needed, GPIO8 or GPIO9 can be used (with caution as they affect boot).
+| GPIO8 | Onboard RGB LED | Status Indicator | Output (WS2812B addressable, no resistor needed) |
 
 ---
 
@@ -220,7 +218,7 @@ graph TB
         GPIO5["GPIO5<br/>SPI CLK"]
         GPIO6["GPIO6<br/>SPI MISO"]
         GPIO7["GPIO7<br/>SPI MOSI"]
-        GPIO10["GPIO10<br/>LED Out"]
+        GPIO8["GPIO8<br/>RGB LED"]
         PWR3V3["3.3V Power"]
         GND["GND"]
     end
@@ -235,7 +233,7 @@ graph TB
     end
     
     subgraph IO["I/O Components"]
-        LED["LED<br/>+ with 220Ω<br/>- to GND"]
+        LED["Onboard RGB LED<br/>GPIO8 (WS2812B)<br/>No resistor needed"]
     end
     
     subgraph EXT["External Devices"]
@@ -261,8 +259,7 @@ graph TB
     RS485BUS -->|Modbus RTU| BOILER
     
     %% I/O Connections
-    GPIO10 -->|Output| LED
-    GND -->|GND| LED
+    GPIO8 -->|Control| LED
     
     style ESP fill:#4A90E2,stroke:#333,stroke-width:2px,color:#fff
     style RF fill:#50C878,stroke:#333,stroke-width:2px,color:#fff
