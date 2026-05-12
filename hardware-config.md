@@ -33,6 +33,38 @@ This document defines the GPIO pin assignments and hardware interface configurat
 
 ---
 
+## Quick Reference: Pin Connections
+
+### SPI (CC1101 RF Receiver)
+| ESP32-C3 | Signal | CC1101 | Function |
+|----------|--------|--------|----------|
+| GPIO4 | CS | CSn | Chip Select |
+| GPIO5 | CLK | DCLK | Clock |
+| GPIO6 | MISO | DOUT | Data Out |
+| GPIO7 | MOSI | DIN | Data In |
+| 3.3V | VCC | VCC | Power |
+| GND | GND | GND | Ground |
+
+### UART (RS-485 to Boiler)
+| ESP32-C3 | Signal | MAX3485 | Direction |
+|----------|--------|---------|-----------|
+| GPIO1 | TX | DI | Data In (from ESP) |
+| GPIO3 | RX | RO | Receiver Out (to ESP) |
+| 3.3V | VCC | VCC | Power |
+| GND | GND | GND | Ground |
+| GND | - | RE | Receiver Enable |
+| GND | - | DE | Driver Enable |
+| - | - | A | RS-485 Bus A |
+| - | - | B | RS-485 Bus B |
+
+### GPIO Outputs/Inputs
+| GPIO | Component | Signal | Configuration |
+|------|-----------|--------|---|
+| GPIO10 | LED | Status | Output (active high, 220Ω resistor) |
+| GPIO11 | Button | User Input | Input (active low, 10kΩ pull-up) |
+
+---
+
 ## Interface Configurations
 
 ### 1. SPI Interface (for CC1101 RF Receiver)
@@ -174,6 +206,75 @@ GPIO10 ----[220Ω]----[LED+]----GND
 3. **Antenna:** CC1101 requires external antenna (not included in GPIO planning)
 4. **Decoupling:** Place 100nF capacitor near power pins of each IC
 5. **Grounding:** Use multiple GND connections for better signal integrity
+
+---
+
+## Hardware Wiring Diagram (Mermaid)
+
+```mermaid
+graph TB
+    subgraph ESP["ESP32-C3 Microcontroller"]
+        GPIO1["GPIO1<br/>UART1 TX"]
+        GPIO3["GPIO3<br/>UART1 RX"]
+        GPIO4["GPIO4<br/>SPI CS"]
+        GPIO5["GPIO5<br/>SPI CLK"]
+        GPIO6["GPIO6<br/>SPI MISO"]
+        GPIO7["GPIO7<br/>SPI MOSI"]
+        GPIO10["GPIO10<br/>LED Out"]
+        GPIO11["GPIO11<br/>Button In"]
+        PWR3V3["3.3V Power"]
+        GND["GND"]
+    end
+    
+    subgraph RF["RF Receiver (Water Meter)"]
+        CC1101["CC1101 Module<br/>868 MHz"]
+    end
+    
+    subgraph RS["RS-485 Bridge (Boiler)"]
+        MAX3485["MAX3485<br/>RS-485 Driver"]
+        RS485BUS["RS-485 Bus<br/>A/B Lines"]
+    end
+    
+    subgraph IO["I/O Components"]
+        LED["LED<br/>+ with 220Ω<br/>- to GND"]
+        BTN["Push Button<br/>3.3V to GPIO<br/>with 10kΩ PU"]
+    end
+    
+    subgraph EXT["External Devices"]
+        METER["Water Meter<br/>RF Signal"]
+        BOILER["Heating Boiler<br/>RS-485"]
+    end
+    
+    %% RF Connections
+    GPIO4 -->|CS| CC1101
+    GPIO5 -->|CLK| CC1101
+    GPIO6 -->|MISO| CC1101
+    GPIO7 -->|MOSI| CC1101
+    PWR3V3 -->|3.3V| CC1101
+    GND -->|GND| CC1101
+    METER -->|RF Signal| CC1101
+    
+    %% RS-485 Connections
+    GPIO1 -->|TX| MAX3485
+    GPIO3 -->|RX| MAX3485
+    PWR3V3 -->|3.3V| MAX3485
+    GND -->|GND| MAX3485
+    MAX3485 -->|A/B| RS485BUS
+    RS485BUS -->|Modbus RTU| BOILER
+    
+    %% I/O Connections
+    GPIO10 -->|Output| LED
+    GND -->|GND| LED
+    GPIO11 -->|Input| BTN
+    PWR3V3 -->|3.3V| BTN
+    GND -->|GND| BTN
+    
+    style ESP fill:#4A90E2,stroke:#333,stroke-width:2px,color:#fff
+    style RF fill:#50C878,stroke:#333,stroke-width:2px,color:#fff
+    style RS fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#fff
+    style IO fill:#FFB84D,stroke:#333,stroke-width:2px,color:#fff
+    style EXT fill:#9B59B6,stroke:#333,stroke-width:2px,color:#fff
+```
 
 ---
 
