@@ -1,13 +1,12 @@
-# ESP32-C3 Hardware Configuration
+# ESP32-C3 Super Mini Hardware Configuration
 
 ## Overview
-This document defines the GPIO pin assignments and hardware interface configuration for the water meter and boiler device based on the ESP32-C3 microcontroller.
+This document defines the GPIO pin assignments and hardware interface configuration for the water meter and boiler device based on the ESP32-C3 Super Mini microcontroller.
 
 ## Device Components
 - **RF Receiver:** CC1101 (SPI interface)
 - **RS-485 Driver:** MAX3485 (UART interface)
-- **Status Indicator:** LED
-- **User Input:** Push Button
+- **Status Indicator:** LED (GPIO10)
 - **Console:** USB Serial (UART0 - dedicated)
 
 ---
@@ -27,7 +26,7 @@ This document defines the GPIO pin assignments and hardware interface configurat
 | GPIO8 | (Reserved) | SPI Flash CLK | Internal | DO NOT USE - SPI Flash |
 | GPIO9 | (Reserved) | SPI Flash CS | Internal | DO NOT USE - SPI Flash |
 | GPIO10 | LED Status | Output | GPIO | Status indicator (active high) |
-| GPIO11 | Button (User Input) | Input | GPIO | Push button input (with pull-up) |
+| GPIO11 | (Not exposed) | - | - | Not available on Super Mini |
 | GPIO20 | Console (UART0) | RX | UART0 RX | USB serial console (reserved) |
 | GPIO21 | Console (UART0) | TX | UART0 TX | USB serial console (reserved) |
 
@@ -61,7 +60,8 @@ This document defines the GPIO pin assignments and hardware interface configurat
 | GPIO | Component | Signal | Configuration |
 |------|-----------|--------|---|
 | GPIO10 | LED | Status | Output (active high, 220Ω resistor) |
-| GPIO11 | Button | User Input | Input (active low, 10kΩ pull-up) |
+
+**Note:** GPIO11 (button) is not exposed on ESP32-C3 Super Mini. If user input is needed, GPIO8 or GPIO9 can be used (with caution as they affect boot).
 
 ---
 
@@ -221,7 +221,6 @@ graph TB
         GPIO6["GPIO6<br/>SPI MISO"]
         GPIO7["GPIO7<br/>SPI MOSI"]
         GPIO10["GPIO10<br/>LED Out"]
-        GPIO11["GPIO11<br/>Button In"]
         PWR3V3["3.3V Power"]
         GND["GND"]
     end
@@ -237,7 +236,6 @@ graph TB
     
     subgraph IO["I/O Components"]
         LED["LED<br/>+ with 220Ω<br/>- to GND"]
-        BTN["Push Button<br/>3.3V to GPIO<br/>with 10kΩ PU"]
     end
     
     subgraph EXT["External Devices"]
@@ -265,9 +263,6 @@ graph TB
     %% I/O Connections
     GPIO10 -->|Output| LED
     GND -->|GND| LED
-    GPIO11 -->|Input| BTN
-    PWR3V3 -->|3.3V| BTN
-    GND -->|GND| BTN
     
     style ESP fill:#4A90E2,stroke:#333,stroke-width:2px,color:#fff
     style RF fill:#50C878,stroke:#333,stroke-width:2px,color:#fff
