@@ -1,12 +1,17 @@
-# ESP32-C3 Super Mini Hardware Configuration
+# ESP32-C3 Plus Hardware Configuration
 
 ## Overview
-This document defines the GPIO pin assignments and hardware interface configuration for the water meter and boiler device based on the ESP32-C3 Super Mini microcontroller.
+This document defines the GPIO pin assignments and hardware interface configuration for the water meter and boiler device based on the **LilyGO ESP32-C3 Plus** microcontroller.
+
+**Board Features:**
+- Onboard RGB LEDs (3 discrete LEDs for status indication)
+- Compact form factor with full GPIO pin access
+- Built-in USB programming support
 
 ## Device Components
 - **RF Receiver:** CC1101 (SPI interface)
 - **RS-485 Driver:** MAX3485 (UART interface)
-- **Status Indicator:** Onboard RGB LED (GPIO8, WS2812B addressable)
+- **Status Indicators:** Onboard RGB LEDs (GPIO3, GPIO8, GPIO10)
 - **Console:** USB Serial (UART0 - dedicated)
 
 ---
@@ -23,8 +28,9 @@ This document defines the GPIO pin assignments and hardware interface configurat
 | GPIO5 | CC1101 | CLK (Clock) | SPI2 CLK | SPI clock signal |
 | GPIO6 | CC1101 | MISO (Master In, Slave Out) | SPI2 MISO | Data from CC1101 to ESP32-C3 |
 | GPIO7 | CC1101 | MOSI (Master Out, Slave In) | SPI2 MOSI | Data from ESP32-C3 to CC1101 |
-| GPIO8 | (Reserved) | SPI Flash CLK | Internal | **ONBOARD RGB LED (WS2812B) - Use for status** |
-| GPIO9 | (Reserved) | SPI Flash CS | Internal | DO NOT USE - SPI Flash |
+| GPIO3 | Red LED | Output | LED | Status indicator (active high, onboard) |
+| GPIO8 | Green LED | Output | LED | Status indicator (active high, onboard) |
+| GPIO10 | Blue LED | Output | LED | Status indicator (active high, onboard) |
 | GPIO10 | (Available) | - | GPIO | Available for other uses |
 | GPIO11 | (Not exposed) | - | - | Not available on Super Mini |
 | GPIO20 | Console (UART0) | RX | UART0 RX | USB serial console (reserved) |
@@ -59,7 +65,9 @@ This document defines the GPIO pin assignments and hardware interface configurat
 ### GPIO Outputs/Inputs
 | GPIO | Component | Signal | Configuration |
 |------|-----------|--------|---|
-| GPIO8 | Onboard RGB LED | Status Indicator | Output (WS2812B addressable, no resistor needed) |
+| GPIO3 | Red LED | Status | Output (active high, onboard) |
+| GPIO8 | Green LED | Status | Output (active high, onboard) |
+| GPIO10 | Blue LED | Status | Output (active high, onboard) |
 
 ---
 
@@ -218,7 +226,9 @@ graph TB
         GPIO5["GPIO5<br/>SPI CLK"]
         GPIO6["GPIO6<br/>SPI MISO"]
         GPIO7["GPIO7<br/>SPI MOSI"]
-        GPIO8["GPIO8<br/>RGB LED"]
+        GPIO3["GPIO3<br/>Red LED"]
+        GPIO8["GPIO8<br/>Green LED"]
+        GPIO10["GPIO10<br/>Blue LED"]
         PWR3V3["3.3V Power"]
         GND["GND"]
     end
@@ -232,8 +242,10 @@ graph TB
         RS485BUS["RS-485 Bus<br/>A/B Lines"]
     end
     
-    subgraph IO["I/O Components"]
-        LED["Onboard RGB LED<br/>GPIO8 (WS2812B)<br/>No resistor needed"]
+    subgraph IO["Status LEDs (Onboard)"]
+        RED["Red LED<br/>GPIO3"]
+        GREEN["Green LED<br/>GPIO8"]
+        BLUE["Blue LED<br/>GPIO10"]
     end
     
     subgraph EXT["External Devices"]
@@ -259,7 +271,12 @@ graph TB
     RS485BUS -->|Modbus RTU| BOILER
     
     %% I/O Connections
-    GPIO8 -->|Control| LED
+    GPIO3 -->|Control| RED
+    GPIO8 -->|Control| GREEN
+    GPIO10 -->|Control| BLUE
+    GND -->|GND| RED
+    GND -->|GND| GREEN
+    GND -->|GND| BLUE
     
     style ESP fill:#4A90E2,stroke:#333,stroke-width:2px,color:#fff
     style RF fill:#50C878,stroke:#333,stroke-width:2px,color:#fff
