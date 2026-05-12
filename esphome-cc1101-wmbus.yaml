@@ -1,0 +1,206 @@
+# ESPHome Configuration for CC1101 RF Water Meter Receiver (WMBus Mode)
+# ESP32-C3 Based Water Meter and Boiler Device
+# ============================================================
+#
+# This configuration defines the CC1101 RF receiver component for reading
+# Flowis+ water meter data via WMBus (Wireless Meter-Bus) wireless transmission.
+# 
+# METER DETAILS:
+# - Device: Flowis+ Water Meter
+# - Protocol: WMBus (Wireless Meter-Bus) EN13757-4 compliant
+# - Frequency: 868 MHz (European ISM band, 868.95 MHz typical)
+# - Transmission: Unidirectional (T1 mode)
+# - Encryption: AES-128 (modes 5 and 7)
+#
+# REQUIRED CONFIGURATION:
+# 1. Find your meter ID (MBUS ID / Serial Number)
+#    - Located on meter label or inside meter documentation
+#    - Format: 8-digit hex number (e.g., 12345678)
+#    - Set in 'meter_id' field below
+#
+# 2. Update KEY if your meter uses encrypted transmission
+#    - Some Flowis+ meters may require AES-128 encryption key
+#    - Contact meter provider or check documentation for key
+#
+# Integration: MQTT - All sensor data published to home server
+#
+
+esphome:
+  name: water-meter-device
+  friendly_name: Water Meter & Boiler Device
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: ESP32C3
+
+# ============================================================
+# LOGGER CONFIGURATION
+# ============================================================
+
+logger:
+  level: DEBUG
+  logs:
+    cc1101: DEBUG
+    wmbus: DEBUG
+    spi: DEBUG
+    mqtt: DEBUG
+
+# ============================================================
+# SPI INTERFACE CONFIGURATION (SPI2 / VSPI)
+# ============================================================
+# CC1101 SPI configuration per hardware-config.md
+# Frequency: 5 MHz, Mode 0
+
+spi:
+  - id: spi_bus
+    clk_pin: GPIO5          # CC1101 DCLK (Serial Clock)
+    mosi_pin: GPIO7         # CC1101 DIN (Master Out, Slave In)
+    miso_pin: GPIO6         # CC1101 DOUT (Master In, Slave Out)
+    frequency: 5MHz
+    mode: 0
+
+# ============================================================
+# CC1101 RF RECEIVER COMPONENT FOR WMBUS
+# ============================================================
+
+rf_switch:
+  id: cc1101_receiver
+  cs_pin: GPIO4             # Chip Select (active low)
+  spi_id: spi_bus
+  carrier_frequency: 868MHz # WMBus frequency (868.95 MHz nominal)
+
+# ============================================================
+# WMBUS COMPONENT - FLOWIS+ WATER METER
+# ============================================================
+#
+# IMPORTANT: Configure your meter ID below
+# Find the 8-digit hex ID on your meter (e.g., 0x12345678)
+
+wmbus:
+  id: wmbus_device
+  spi_id: spi_bus
+  cs_pin: GPIO4
+  rx_only: true  # Flowis+ is transmit-only, we only receive
+
+  # ========== CONFIGURE YOUR METER HERE ==========
+  # Replace XXXXXXXX with your Flowis+ meter ID (8-digit hex)
+  # Example: 0x12AB34CD
+  # 
+  # To find your meter ID:
+  # 1. Check the meter label/documentation
+  # 2. Enable debug logging and watch serial output for received frames
+  # 3. Look for format like "Meter ID: 0x..."
+  
+  meter_id: 0xXXXXXXXX  # <-- SET YOUR METER ID HERE
+  
+  # Optional: If meter uses encryption
+  # key: "0000000000000000000000000000000000000000000000000000000000000000"
+
+# ============================================================
+# SENSORS - WATER METER DATA
+# ============================================================
+
+sensor:
+  - platform: wmbus
+    wmbus_id: wmbus_device
+    # Meter ID must match the meter you want to read
+    meter_id: 0xXXXXXXXX  # <-- SET YOUR METER ID HERE (same as above)
+    
+    # Current water consumption reading
+    - type: total_water_m3
+      name: "Water Meter Consumption"
+      unit_of_measurement: "m³"
+      device_class: water
+      icon: mdi:water
+      accuracy_decimals: 3
+      
+    # Flow rate (if available in meter)
+    - type: current_volume_m3h
+      name: "Water Flow Rate"
+      unit_of_measurement: "m³/h"
+      device_class: water
+      icon: mdi:water-percent
+      
+    # Last flow (if available)
+    - type: volume_liquid_liters
+      name: "Water Last Flow"
+      unit_of_measurement: "L"
+      device_class: water
+
+  # Device status and connectivity
+  - platform: uptime
+    name: "Device Uptime"
+    unit_of_measurement: "seconds"
+    icon: mdi:timer
+    
+  - platform: wifi_signal
+    name: "WiFi Signal Strength"
+    unit_of_measurement: "dBm"
+    update_interval: 60s
+
+# ============================================================
+# BINARY SENSORS - METER STATUS
+# ============================================================
+
+binary_sensor:
+  - platform: wmbus
+    wmbus_id: wmbus_device
+    meter_id: 0xXXXXXXXX  # <-- SET YOUR METER ID HERE
+    
+    # Leak detection
+    - type: leak_detected
+      name: "Water Leak Detected"
+      icon: mdi:leak
+      
+    # Meter status (error, etc.)
+    - type: error_state
+      name: "Meter Error"
+      icon: mdi:alert-circle
+
+# ============================================================
+# STATUS LED (WS2812 RGB)
+# ============================================================
+# Visual feedback for device status
+
+light:
+  - platform: neopixelbus
+    type: GRB
+    pin: GPIO8
+    num_leds: 1
+    name: "Status LED"
+    effects:
+      - pulse:
+      - strobe:
+
+# ============================================================
+# TEXT SENSORS - DEBUG INFO
+# ============================================================
+
+text_sensor:
+  - platform: wmbus
+    wmbus_id: wmbus_device
+    meter_id: 0xXXXXXXXX  # <-- SET YOUR METER ID HERE
+    
+    # Raw meter data for debugging
+    - type: meter_timestamp
+      name: "Meter Timestamp"
+      
+    - type: device_status
+      name: "Meter Status"
+
+# ============================================================
+# CLIMATE/SETPOINT (if meter provides temperature)
+# ============================================================
+# Some advanced Flowis+ models may report temperature data
+
+# climate:
+#   - platform: wmbus
+#     wmbus_id: wmbus_device
+#     meter_id: 0xXXXXXXXX
+#     name: "Water Temperature"
+
+# ============================================================
+# API & CONNECTIVITY - Set in main esphome.yaml
+# ============================================================
+# (WiFi, MQTT, and API are configured in esphome.yaml
+#  See esphome-mqtt.yaml for MQTT configuration)
