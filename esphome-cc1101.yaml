@@ -1,0 +1,224 @@
+# ESPHome Configuration for CC1101 RF Water Meter Receiver
+# ESP32-C3 Based Water Meter and Boiler Device
+# ============================================================
+#
+# This configuration defines the CC1101 RF receiver component for reading
+# water meter data via wireless transmission. It includes SPI interface
+# configuration, CC1101 component setup, and related sensor definitions.
+#
+# Integration: HTTP/MQTT - All sensor data exposed via REST API and MQTT topics
+#
+
+esphome:
+  name: water-meter-device
+  friendly_name: Water Meter & Boiler Device
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: ESP32C3
+
+# ============================================================
+# LOGGER CONFIGURATION
+# ============================================================
+# Enable debug logging for RF components to capture signals and diagnose issues
+
+logger:
+  level: DEBUG
+  logs:
+    cc1101: DEBUG
+    rfswitch: DEBUG
+    spi: DEBUG
+    mqtt: DEBUG
+
+# ============================================================
+# SPI INTERFACE CONFIGURATION (SPI2 / VSPI)
+# ============================================================
+# Defines the SPI2 bus with pins configured per hardware-config.md
+# Frequency: 5 MHz (conservative, within CC1101 safe operating range of 5-10 MHz)
+# Mode: 0 (CPOL=0, CPHA=0) - Standard SPI mode for CC1101
+
+spi:
+  - id: spi_bus
+    clk_pin: GPIO5          # CC1101 DCLK (Serial Clock)
+    mosi_pin: GPIO7         # CC1101 DIN (Master Out, Slave In / Data to CC1101)
+    miso_pin: GPIO6         # CC1101 DOUT (Master In, Slave Out / Data from CC1101)
+    frequency: 5MHz         # Conservative frequency for reliable CC1101 communication
+    mode: 0                 # SPI Mode 0 (CPOL=0, CPHA=0)
+
+# ============================================================
+# CC1101 RF RECEIVER COMPONENT
+# ============================================================
+# Configuration for the CC1101 radio frequency transceiver
+#
+# PROTOCOL ASSUMPTIONS:
+# - Operating Frequency: 868 MHz (European ISM band)
+#   Alternative: 915 MHz (North America ISM band)
+#   Rationale: 868 MHz is standard for European utility meters.
+#   Change to 915MHz if your meter is in North America.
+#
+# - Modulation: FSK (Frequency Shift Keying)
+#   Common for low-power sensor networks and utility devices
+#
+# - Data Rate: 4.8 kbps
+#   Typical for water meter RF transmission
+#
+# NOTE: Actual protocol decoding depends on specific meter model.
+# This provides generic RF signal handling to be adapted once exact
+# meter protocol is determined via signal analysis.
+
+rf_switch:
+  id: cc1101_receiver
+  cs_pin: GPIO4             # Chip Select (active low)
+  spi_id: spi_bus
+  carrier_frequency: 868MHz # European ISM band (change to 915MHz for US)
+
+# ============================================================
+# SENSOR DEFINITIONS - WATER METER DATA
+# ============================================================
+
+sensor:
+  # Main water meter reading in cubic meters (m³)
+  - platform: template
+    name: "Water Meter Reading"
+    id: water_meter_reading
+    unit_of_measurement: "m³"
+    icon: mdi:water
+    accuracy_decimals: 3
+    update_interval: never
+    lambda: return {};
+
+  # Water consumption rate (flow rate)
+  - platform: template
+    name: "Water Flow Rate"
+    id: water_flow_rate
+    unit_of_measurement: "L/min"
+    icon: mdi:water-percent
+    accuracy_decimals: 1
+    update_interval: never
+    lambda: return {};
+
+  # Signal strength indicator for RF reception
+  - platform: template
+    name: "RF Signal Strength"
+    id: rf_signal_strength
+    unit_of_measurement: "%"
+    icon: mdi:signal
+    accuracy_decimals: 0
+    update_interval: never
+    lambda: return {};
+
+# ============================================================
+# BINARY SENSOR FOR RF SIGNAL DETECTION
+# ============================================================
+
+binary_sensor:
+  - platform: template
+    name: "Water Meter Signal Received"
+    id: water_meter_signal
+    icon: mdi:signal-variant
+
+  # Status LED indicator
+  - platform: gpio
+    name: "Status LED"
+    pin: GPIO10
+    icon: mdi:led-on
+    id: status_led
+
+  # User button
+  - platform: gpio
+    name: "User Button"
+    pin: GPIO11
+    icon: mdi:button-pointer
+    filters:
+      - invert
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+
+# ============================================================
+# HTTP SERVER
+# ============================================================
+# Exposes sensor data via HTTP REST API for custom solution integration
+
+web_server:
+  port: 80
+  auth:
+    username: admin
+    password: !secret http_password
+
+# ============================================================
+# MQTT CONFIGURATION
+# ============================================================
+# Publish sensor data to MQTT broker for integration
+
+mqtt:
+  broker: !secret mqtt_broker
+  port: 1883
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  id: mqtt_client
+  discovery: false  # Disable Home Assistant discovery
+  
+  # Topic structure for custom integration:
+  # water-meter/sensor/reading - meter reading in m³
+  # water-meter/sensor/flow_rate - flow rate in L/min
+  # water-meter/sensor/signal_strength - RSSI in %
+  # water-meter/binary_sensor/signal - signal received (on/off)
+
+# ============================================================
+# LOGGING INTERVAL FOR DEBUGGING
+# ============================================================
+
+interval:
+  - interval: 60s
+    then:
+      - logger.log: "RF monitoring active - awaiting water meter signal"
+
+# ============================================================
+# CONFIGURATION FOR SECRETS
+# ============================================================
+# Create a secrets.yaml file with:
+#
+# http_password: "your_http_password"
+# mqtt_broker: "192.168.1.100"
+# mqtt_username: "esphome"
+# mqtt_password: "your_mqtt_password"
+
+# ============================================================
+# NOTES FOR IMPLEMENTATION
+# ============================================================
+#
+# 1. WATER METER PROTOCOL DISCOVERY:
+#    - Capture RF signal using software-defined radio (SDR)
+#    - Analyze with GQRX or similar tool
+#    - Determine: frequency, modulation, data rate, packet format
+#    - Implement decoder in lambda functions (sensor platform: template)
+#
+# 2. FREQUENCY CONFIGURATION:
+#    Default: 868 MHz (Europe)
+#    Alternative: 915 MHz (North America)
+#    Check local ISM band regulations for your region
+#
+# 3. SENSOR VALUE UPDATES:
+#    Update sensor values programmatically via:
+#    ```cpp
+#    id(water_meter_reading).publish_state(1234.567);
+#    id(water_flow_rate).publish_state(12.5);
+#    id(rf_signal_strength).publish_state(85);
+#    id(water_meter_signal).publish_state(true);
+#    ```
+#
+# 4. HTTP API ENDPOINTS:
+#    GET /sensor/water_meter_reading - current meter reading
+#    GET /sensor/water_flow_rate - current flow rate
+#    POST /api/sensor/water_meter_reading/set?value=1234.567
+#
+# 5. MQTT TOPICS:
+#    Publish meter data to custom topics for your application
+#    Subscribe to control topics if needed (e.g., alerts, configuration)
+#
+# 6. INTEGRATION WITH CUSTOM SOLUTION:
+#    - This device acts as an HTTP/MQTT endpoint
+#    - Your backend retrieves data via REST API or MQTT subscribe
+#    - No Home Assistant dependency - pure ESPHome + custom logic
+#
+# ============================================================

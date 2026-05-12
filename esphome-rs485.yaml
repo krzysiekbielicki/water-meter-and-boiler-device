@@ -1,0 +1,381 @@
+# ESPHome Configuration for RS-485 Modbus Interface
+# ESP32-C3 Water Meter and Boiler Device
+# 
+# Purpose: Configure RS-485 serial interface for ecoMAX boiler communication
+# Hardware: MAX3485 RS-485 driver connected to UART1 (GPIO1/TX, GPIO3/RX)
+# Protocol: Modbus RTU (handled by pyplumio library running on host)
+#
+# This ESPHome configuration exposes the RS-485 UART interface to Home Assistant
+# via TCP socket, allowing pyplumio (Python library) to connect and communicate
+# with the ecoMAX boiler controller.
+#
+# Integration Flow:
+#   ecoMAX Boiler --[RS-485 bus (A/B lines)]--> MAX3485 driver --[UART1]-->
+#   ESP32-C3 --[TCP/WiFi]--> Home Assistant --[pyplumio]--> Modbus RTU decode
+#
+# ============================================================================
+
+esphome:
+  name: water-meter-boiler
+  friendly_name: "Water Meter Boiler Device"
+
+esp32_c3:
+  board: esp32-c3-devkitm-1
+
+# ============================================================================
+# LOGGER CONFIGURATION
+# ============================================================================
+# Enable debug logging for UART troubleshooting
+# WARNING: Verbose logging can impact performance; disable in production
+
+logger:
+  level: DEBUG
+  logs:
+    uart: DEBUG
+
+# ============================================================================
+# UART CONFIGURATION FOR RS-485
+# ============================================================================
+# UART1 (hardware UART) configuration for MAX3485 RS-485 driver interface
+#
+# Hardware Connection (per hardware-config.md):
+#   GPIO1  = UART1 TX (transmit from ESP32 to boiler)
+#   GPIO3  = UART1 RX (receive from boiler to ESP32)
+#   GND    = Common ground (MAX3485 RE and DE tied to GND for RX-only mode)
+#
+# Boiler Configuration:
+#   Baud Rate: 9600 bps (standard for ecoMAX controllers)
+#   Data Bits: 8
+#   Stop Bits: 1
+#   Parity: NONE
+#   Flow Control: None
+#
+# RS-485 Hardware:
+#   Driver: MAX3485 (or equivalent half-duplex driver)
+#   Mode: Receive-only (RE and DE tied to GND)
+#   - This means the ESP32 can only read from the boiler
+#   - Cannot send write commands to the boiler via this interface
+#   - Suitable for monitoring boiler status/sensors
+#
+# ============================================================================
+
+uart:
+  - id: uart_rs485
+    tx_pin: GPIO1
+    rx_pin: GPIO3
+    baud_rate: 9600
+    data_bits: 8
+    stop_bits: 1
+    parity: NONE
+    # Uncomment for debugging: logs all UART bytes (verbose output)
+    # debug: true
+
+# ============================================================================
+# SERIAL TO NETWORK BRIDGE (ser2net alternative)
+# ============================================================================
+# This configuration exposes the RS-485 UART as a TCP service
+# allowing remote clients (pyplumio running on Home Assistant or separate host)
+# to connect and communicate with the ecoMAX boiler
+#
+# Connection Details:
+#   Protocol: TCP/IP
+#   Port: 8899 (standard port for RS-485 to Ethernet bridges)
+#   Client: pyplumio (Python library for ecoMAX communication)
+#
+# How it works:
+#   1. ESP32-C3 exposes UART1 data over TCP socket
+#   2. Remote client (pyplumio) connects via:
+#      pyplumio.open_tcp_connection("esp32-ip-address", port=8899)
+#   3. All serial data flows through the TCP connection
+#   4. pyplumio handles Modbus RTU protocol decoding
+#   5. Parsed boiler data (temp, pressure, status) sent to Home Assistant
+#
+# Note: ESPHome doesn't have built-in ser2net component
+# Alternative implementations:
+#   A) Use ESPHome's TCP/UDP components with custom code
+#   B) Run ser2net separately on a device that has RS-485 (Linux box)
+#   C) Use dedicated RS-485 to Ethernet converter hardware
+#   D) Forward UART data to MQTT for pyplumio to consume
+#
+# For now, this config provides the UART base layer.
+# The TCP bridge can be implemented via:
+#   - Custom ESPHome component (C++)
+#   - Separate ser2net service on network
+#   - Home Assistant add-on with pyplumio
+#
+# ============================================================================
+
+# ============================================================================
+# STATUS LED INDICATOR
+# ============================================================================
+# GPIO10 LED for device status indication
+# Visual feedback: blink pattern indicates device state
+
+output:
+  - platform: gpio
+    pin: GPIO10
+    id: led_status
+
+status_led:
+  pin: GPIO10
+
+# ============================================================================
+# BUTTON INPUT
+# ============================================================================
+# GPIO11 for user interaction (optional)
+
+binary_sensor:
+  - platform: gpio
+    pin: GPIO11
+    name: "User Button"
+    filters:
+      - invert
+      - delayed_on: 10ms
+
+# ============================================================================
+# BOILER MONITORING VIA SENSORS
+# ============================================================================
+# NOTES on pyplumio integration:
+# 
+# The RS-485 UART interface carries Modbus RTU protocol frames between
+# the ESP32 and ecoMAX boiler. The actual data parsing (temperature,
+# pressure, status flags) is handled by the pyplumio Python library.
+#
+# ESPHome's role:
+#   1. Expose raw RS-485 UART communication
+#   2. Forward serial frames over network (TCP or MQTT)
+#   3. Provide device connectivity (WiFi, OTA updates)
+#
+# pyplumio's role:
+#   1. Connect to ESP32 via TCP socket (ser2net-like interface)
+#   2. Send Modbus RTU queries to the boiler
+#   3. Parse Modbus RTU responses
+#   4. Extract sensor data (temperature, pressure, flow, etc.)
+#   5. Send parsed data to Home Assistant via API or MQTT
+#
+# To use pyplumio with this ESPHome device:
+#
+# Option 1: Home Assistant Add-on (Recommended)
+# ────────────────────────────────────────────
+#   1. Install pyplumio Home Assistant add-on
+#   2. Configure connection:
+#      host: <esp32-ip-address>
+#      port: 8899  (or via ser2net on separate device)
+#   3. Entities auto-discovered in Home Assistant
+#
+# Option 2: Python Script on Separate Host
+# ──────────────────────────────────────────
+#   1. Install pyplumio: pip install pyplumio
+#   2. Script example:
+#      
+#      import asyncio
+#      import pyplumio
+#      
+#      async def main():
+#          # Connect to ESP32 RS-485 bridge
+#          async with pyplumio.open_tcp_connection(
+#              "192.168.1.100",  # ESP32 IP address
+#              port=8899          # RS-485 bridge port
+#          ) as connection:
+#              # pyplumio automatically discovers boiler data
+#              await connection.check()
+#              
+#              # Read device data
+#              device = connection.device
+#              print(f"Boiler temperature: {device.get('temperature')}")
+#              print(f"Boiler pressure: {device.get('pressure')}")
+#              
+#      asyncio.run(main())
+#
+# ============================================================================
+
+# Placeholder for boiler data sensors
+# These will be populated by pyplumio via Home Assistant
+# (not by ESPHome directly, as Modbus decoding happens in pyplumio)
+
+sensor:
+  # Example: uptime for monitoring device health
+  - platform: uptime
+    name: "Device Uptime"
+    unit_of_measurement: minutes
+    update_interval: 60s
+
+# ============================================================================
+# MODBUS RTU PROTOCOL REFERENCE (FOR DOCUMENTATION)
+# ============================================================================
+#
+# Modbus RTU Frame Structure (sent over RS-485):
+#
+#   Start         Slave   Function   Data            CRC
+#   (silence)     ID      Code       (Variable)      (16-bit)
+#   3.5 chars     1 byte  1 byte     N bytes         2 bytes
+#
+# Example: Read coil status (function code 01)
+#
+#   Request Frame (7 bytes):
+#   [Slave_ID]  [Function] [Start_Address_HI] [Start_Address_LO] 
+#   [01]        [01]       [00]                [64]
+#
+#   [Quantity_HI] [Quantity_LO] [CRC_LO] [CRC_HI]
+#   [00]          [01]          [XX]     [XX]
+#
+#   Response Frame (5 bytes):
+#   [Slave_ID] [Function] [Byte_Count] [Coil_Data] [CRC_LO] [CRC_HI]
+#   [01]       [01]       [01]         [00]        [XX]     [XX]
+#
+# Common Modbus Function Codes:
+#   01 - Read Coils (discrete outputs, 1-bit each)
+#   02 - Read Discrete Inputs (1-bit each)
+#   03 - Read Holding Registers (16-bit, read/write)
+#   04 - Read Input Registers (16-bit, read-only)
+#   05 - Write Single Coil
+#   06 - Write Single Register
+#   15 - Write Multiple Coils
+#   16 - Write Multiple Registers
+#
+# ecoMAX Boiler Modbus Details:
+#   - Slave ID: 1 (or 2, model dependent)
+#   - Baud Rate: 9600 bps
+#   - Register Layout: Manufacturer-specific (see ecoMAX datasheet)
+#   - Common registers:
+#     * 0x0C: Boiler status
+#     * 0x0D: Water temperature
+#     * 0x0E: Boiler temperature
+#     * 0x11: Pressure
+#     (Exact addresses vary by ecoMAX firmware version)
+#
+# ============================================================================
+
+# ============================================================================
+# RECOMMENDED SETUP STEPS
+# ============================================================================
+#
+# 1. Flash this ESPHome config to the ESP32-C3
+#    - Compile: esphome compile esphome-rs485.yaml
+#    - Upload: esphome upload esphome-rs485.yaml --device /dev/ttyUSB0
+#
+# 2. Verify UART Communication
+#    - Monitor ESP32 serial output for debug messages
+#    - Check boiler is powered and RS-485 bus is connected
+#    - Look for UART activity in logs (no errors = good)
+#
+# 3. Install pyplumio in Home Assistant
+#    - Option A: Add pyplumio Home Assistant add-on
+#    - Option B: Run pyplumio on separate Python environment
+#
+# 4. Configure pyplumio Connection
+#    - Set host: <ESP32 IP address>
+#    - Set port: 8899
+#    - Let pyplumio auto-discover boiler data
+#
+# 5. Verify Data Reception
+#    - Check Home Assistant entities for boiler data
+#    - Monitor temperature, pressure, status fields
+#    - Create automations based on boiler state
+#
+# ============================================================================
+
+# ============================================================================
+# TROUBLESHOOTING GUIDE
+# ============================================================================
+#
+# Issue: No UART activity observed
+# ────────────────────────────────
+#   Symptom: Serial logs show no incoming data
+#   Cause: RS-485 bus not connected or boiler not communicating
+#   Solution:
+#     1. Verify RS-485 A/B lines connected to boiler
+#     2. Check MAX3485 pin connections (DE, RE tied to GND)
+#     3. Confirm boiler is powered on
+#     4. Test with separate Modbus tool to verify boiler responds
+#
+# Issue: CRC errors in Modbus frames
+# ──────────────────────────────────
+#   Symptom: pyplumio logs show "CRC mismatch" errors
+#   Cause: Baud rate mismatch or corrupt frames
+#   Solution:
+#     1. Verify baud rate: 9600 bps (check boiler documentation)
+#     2. Reduce UART speed if noise issues: try 4800 bps
+#     3. Check RS-485 cable quality and length
+#     4. Add ferrite filter to RS-485 lines if EMI interference
+#
+# Issue: pyplumio cannot connect to ESP32
+# ────────────────────────────────────────
+#   Symptom: Connection refused or timeout
+#   Cause: TCP bridge not implemented or firewall blocking
+#   Solution:
+#     1. If using separate ser2net: verify ser2net is running
+#     2. Check firewall allows port 8899
+#     3. Verify ESP32 IP address and connectivity (ping test)
+#     4. Use alternative approach: MQTT-based data forwarding
+#
+# Issue: Incorrect boiler data values
+# ───────────────────────────────────
+#   Symptom: Temperature shows 0, or pressure is negative
+#   Cause: Register mapping error or data type mismatch
+#   Solution:
+#     1. Check ecoMAX firmware version against pyplumio support
+#     2. Verify register addresses match boiler datasheet
+#     3. Check scaling factors (some values are multiplied/divided)
+#     4. Compare with separate Modbus polling tool (e.g., ModbusPoll)
+#
+# ============================================================================
+
+# ============================================================================
+# INTEGRATION WITH OTHER PHASES
+# ============================================================================
+#
+# Phase 1 (Current): RS-485 Interface Configuration
+#   - UART1 communication layer established
+#   - Ready for Modbus RTU protocol (via pyplumio)
+#   - Boiler data available to Home Assistant
+#
+# Phase 2: RF Receiver Integration (CC1101)
+#   - Combine boiler Modbus data with water meter RF data
+#   - Cross-correlate readings for system monitoring
+#
+# Phase 3: Water Meter Reading
+#   - Parse RF water meter signals
+#   - Correlate with boiler heating status
+#   - Track correlation for efficiency metrics
+#
+# Phase 4: Home Assistant Dashboard
+#   - Visualize real-time boiler temperature/pressure
+#   - Show water consumption vs heating activity
+#   - Create automations (e.g., alert on high pressure)
+#
+# Phase 5: Historical Data & Analytics
+#   - Log boiler data to database (InfluxDB, MariaDB)
+#   - Analyze heating patterns and efficiency
+#   - Predict maintenance needs
+#
+# ============================================================================
+
+# ============================================================================
+# NOTES FOR FIRMWARE UPDATES & CONFIGURATION
+# ============================================================================
+#
+# UART Configuration Is Fixed:
+#   - GPIO1/GPIO3 and 9600 baud are hardware requirements
+#   - Cannot be changed without modifying firmware or hardware
+#   - These values match MAX3485 driver capabilities
+#
+# Modbus RTU Decoding:
+#   - ESPHome does NOT decode Modbus (no native Modbus RTU support)
+#   - pyplumio library handles all Modbus protocol logic
+#   - ESPHome just exposes raw serial data over network
+#
+# pyplumio Integration:
+#   - Preferred over ESPHome's limited Modbus component
+#   - Supports ecoMAX-specific data structures
+#   - Actively maintained by community
+#   - Better Home Assistant integration
+#
+# Future Enhancements:
+#   - Implement TCP server in ESPHome (custom C++ component)
+#   - Add MQTT-to-UART bridge (alternative to TCP)
+#   - Support write operations to boiler (requires half-duplex mode)
+#   - Implement CRC validation at ESPHome level for debugging
+#
+# ============================================================================
+

@@ -1,0 +1,568 @@
+# ============================================================================
+# UNIFIED ESPHOME CONFIGURATION - WATER METER & BOILER DEVICE
+# ============================================================================
+#
+# Device Purpose:
+#   Complete IoT device for monitoring water consumption and boiler heating
+#   on an ESP32-C3 microcontroller with WiFi/MQTT connectivity
+#
+# Hardware Architecture:
+#   - CC1101 RF Receiver (SPI) → Water meter wireless signal decoding
+#   - MAX3485 RS-485 Driver (UART1) → ecoMAX boiler Modbus RTU communication
+#   - Status LED (GPIO10) → Device health indicator
+#   - User Button (GPIO11) → Manual interaction
+#   - WiFi/MQTT → Cloud connectivity and data publishing
+#
+# Data Flow:
+#   1. RF signals from water meter → CC1101 receiver → SPI → parsing → m³ reading
+#   2. Modbus RTU frames from boiler → MAX3485 driver → UART1 → pyplumio decoding
+#   3. All sensor data → MQTT broker topics (home/water-meter/*, home/boiler/*)
+#   4. ESPHome API → OTA updates and Home Assistant integration
+#
+# Pin Configuration Reference:
+#   See hardware-config.md for complete GPIO mapping and electrical specs
+#
+# ============================================================================
+
+# ============================================================================
+# ESPHOME CORE CONFIGURATION
+# ============================================================================
+
+esphome:
+  name: water-meter-boiler
+  friendly_name: "Water Meter & Boiler Device"
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: ESP32C3
+  framework:
+    type: arduino
+
+# ============================================================================
+# LOGGER CONFIGURATION
+# ============================================================================
+# Logging levels: DEBUG (verbose) for development, INFO for production
+# Component-specific logging for troubleshooting
+
+logger:
+  level: INFO
+  logs:
+    cc1101: DEBUG
+    rfswitch: DEBUG
+    spi: DEBUG
+    mqtt: DEBUG
+    uart: DEBUG
+    wifi: DEBUG
+
+# ============================================================================
+# SPI INTERFACE CONFIGURATION (SPI2 / VSPI) - CC1101 RF RECEIVER
+# ============================================================================
+# Frequency: 5 MHz (conservative, within CC1101 safe operating range of 5-10 MHz)
+# Mode: 0 (CPOL=0, CPHA=0) - Standard SPI mode for CC1101
+# See hardware-config.md for detailed pin descriptions
+
+spi:
+  - id: spi_bus
+    clk_pin: GPIO5          # CC1101 DCLK (Serial Clock)
+    mosi_pin: GPIO7         # CC1101 DIN (Master Out, Slave In / Data to CC1101)
+    miso_pin: GPIO6         # CC1101 DOUT (Master In, Slave Out / Data from CC1101)
+    frequency: 5MHz         # Conservative frequency for reliable communication
+    mode: 0                 # SPI Mode 0 (CPOL=0, CPHA=0)
+
+# ============================================================================
+# UART INTERFACE CONFIGURATION (UART1) - RS-485 BOILER COMMUNICATION
+# ============================================================================
+# Connection to MAX3485 RS-485 driver for ecoMAX boiler Modbus RTU protocol
+# Standard serial parameters: 9600 bps, 8 data bits, 1 stop bit, no parity
+# See hardware-config.md for MAX3485 pin connections and mode configuration
+
+uart:
+  - id: uart_rs485
+    tx_pin: GPIO1           # UART1 TX to RS-485 driver
+    rx_pin: GPIO3           # UART1 RX from RS-485 driver
+    baud_rate: 9600         # ecoMAX boiler standard
+    data_bits: 8
+    stop_bits: 1
+    parity: NONE
+    # Uncomment for extensive debugging: shows all UART byte traffic
+    # debug: true
+
+# ============================================================================
+# CC1101 RF RECEIVER COMPONENT
+# ============================================================================
+# RF Transceiver for receiving water meter wireless transmissions
+#
+# Frequency Configuration:
+#   - Default: 868 MHz (European ISM band, standard for EU meters)
+#   - Alternative: 915 MHz (North America ISM band)
+#   Check meter specifications and local regulations for your region
+
+rf_switch:
+  id: cc1101_receiver
+  cs_pin: GPIO4             # Chip Select (active low)
+  spi_id: spi_bus
+  carrier_frequency: 868MHz # European ISM band (change to 915MHz for North America)
+
+# ============================================================================
+# WIFI CONFIGURATION
+# ============================================================================
+# Power saving and fallback access point for provisioning
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: LIGHT    # Power saving mode for WiFi (reduces consumption)
+  reboot_timeout: 5min      # Reboot if WiFi not connected after 5 minutes
+  fast_connect: true        # Skip passive scanning for faster reconnection
+  
+  # Fallback AP for provisioning if WiFi not available
+  ap:
+    ssid: "WaterMeter-Fallback"
+    password: !secret fallback_ap_password
+
+# ============================================================================
+# API CONFIGURATION
+# ============================================================================
+# ESPHome native API for Home Assistant integration and OTA updates
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  password: !secret api_password
+  reboot_timeout: 0s        # Disable automatic reboots from API timeout
+
+# ============================================================================
+# OTA UPDATE CONFIGURATION
+# ============================================================================
+# Over-the-air firmware updates with password protection
+
+ota:
+  password: !secret ota_password
+  safe_mode: true           # Requires successful boot before accepting new OTA
+
+# ============================================================================
+# MQTT BROKER CONFIGURATION
+# ============================================================================
+# MQTT publishing for sensor data and Home Assistant MQTT discovery
+# Topic structure documented below
+
+mqtt:
+  broker: !secret mqtt_broker
+  port: 1883
+  client_id: water-meter-boiler
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  keepalive: 60s
+  discovery_enabled: true   # Enable Home Assistant MQTT discovery
+  discovery_prefix: homeassistant
+  
+  will_message:
+    topic: home/device/status
+    payload: "offline"
+    qos: 1
+    retain: true
+  
+  birth_message:
+    topic: home/device/status
+    payload: "online"
+    qos: 1
+    retain: true
+
+# ============================================================================
+# TIME COMPONENT
+# ============================================================================
+# NTP synchronization for timestamps and log accuracy
+
+time:
+  - platform: sntp
+    timezone: UTC
+    servers:
+      - pool.ntp.org
+
+# ============================================================================
+# STATUS LED CONFIGURATION
+# ============================================================================
+# GPIO10 LED for device status indication with heartbeat pattern
+
+output:
+  - platform: gpio
+    pin: GPIO10
+    id: led_status
+
+status_led:
+  pin:
+    number: GPIO10
+    inverted: true          # Inverted: LED off when GPIO high (common anode)
+
+# ============================================================================
+# SENSORS
+# ============================================================================
+
+sensor:
+  # =========================================================================
+  # SYSTEM HEALTH SENSORS
+  # =========================================================================
+  
+  # WiFi signal strength (dBm) - useful for troubleshooting connectivity
+  - platform: wifi_signal
+    name: "WiFi Signal Strength"
+    unit_of_measurement: dBm
+    entity_category: diagnostic
+    update_interval: 60s
+    filters:
+      - throttle: 60s
+
+  # Device uptime in seconds - useful for monitoring stability
+  - platform: uptime
+    name: "Device Uptime"
+    unit_of_measurement: s
+    entity_category: diagnostic
+    update_interval: 60s
+    filters:
+      - throttle: 60s
+
+  # =========================================================================
+  # WATER METER SENSORS
+  # =========================================================================
+  
+  # Main water meter reading in cubic meters (m³)
+  # Updated when CC1101 receives new RF data from water meter
+  - platform: template
+    name: "Water Meter Reading"
+    id: water_meter_reading
+    unit_of_measurement: "m³"
+    device_class: "water"
+    icon: mdi:water
+    state_class: "total_increasing"
+    accuracy_decimals: 3
+    update_interval: never   # Updated only when new RF signal received
+    lambda: return {};
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/water-meter/reading"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+  # Water flow rate in liters per minute (L/min)
+  - platform: template
+    name: "Water Flow Rate"
+    id: water_flow_rate
+    unit_of_measurement: "L/min"
+    device_class: "water"
+    icon: mdi:water-percent
+    state_class: "measurement"
+    accuracy_decimals: 1
+    update_interval: never   # Updated when new RF data received
+    lambda: return {};
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/water-meter/flow"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+  # RF signal strength indicator for water meter reception
+  - platform: template
+    name: "RF Signal Strength"
+    id: rf_signal_strength
+    unit_of_measurement: "%"
+    icon: mdi:signal
+    accuracy_decimals: 0
+    update_interval: never   # Updated when new RF signal received
+    lambda: return {};
+
+  # =========================================================================
+  # BOILER SENSORS (via pyplumio/Modbus RTU)
+  # =========================================================================
+  
+  # Boiler water temperature in Celsius (°C)
+  # Decoded from Modbus RTU frames by pyplumio library
+  - platform: template
+    name: "Boiler Temperature"
+    id: boiler_temperature
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: return 0.0;      # Default; updated via pyplumio data
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/boiler/temperature"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+  # Boiler setpoint temperature in Celsius (°C)
+  - platform: template
+    name: "Boiler Setpoint"
+    id: boiler_setpoint
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: return 50.0;     # Default value; update as needed
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/boiler/setpoint"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+  # Boiler pressure in bar
+  - platform: template
+    name: "Boiler Pressure"
+    id: boiler_pressure
+    unit_of_measurement: "bar"
+    device_class: "pressure"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: return 0.0;
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/boiler/pressure"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+# ============================================================================
+# BINARY SENSORS
+# ============================================================================
+
+binary_sensor:
+  # =========================================================================
+  # WiFi INFORMATION SENSORS
+  # =========================================================================
+  
+  # Current WiFi connection info
+  - platform: wifi_info
+    ip_address:
+      name: "Device IP Address"
+      entity_category: diagnostic
+    ssid:
+      name: "Connected SSID"
+      entity_category: diagnostic
+    bssid:
+      name: "Connected BSSID"
+      entity_category: diagnostic
+
+  # =========================================================================
+  # WATER METER RF SIGNAL SENSOR
+  # =========================================================================
+  
+  # Indicates when RF signal from water meter is successfully received
+  - platform: template
+    name: "Water Meter Signal Received"
+    id: water_meter_signal
+    icon: mdi:signal-variant
+    # Updated when RF signal is successfully decoded
+
+  # =========================================================================
+  # BOILER STATUS SENSOR
+  # =========================================================================
+  
+  # Boiler operational status (on/off)
+  # Decoded from Modbus RTU status registers by pyplumio
+  - platform: template
+    name: "Boiler Status"
+    id: boiler_status
+    device_class: "running"
+    icon: "mdi:fireplace"
+    lambda: return false;    # Default; updated via pyplumio data
+    filters:
+      - throttle: 10s
+    on_state:
+      then:
+        - mqtt.publish:
+            topic: "home/boiler/status"
+            payload: !lambda 'return x ? "on" : "off";'
+            qos: 1
+            retain: true
+
+  # =========================================================================
+  # USER BUTTON
+  # =========================================================================
+  
+  # GPIO11 push button with debouncing (active low, pull-up enabled)
+  - platform: gpio
+    pin: GPIO11
+    name: "User Button"
+    icon: mdi:button-pointer
+    filters:
+      - invert              # Invert: button pressed = true
+      - delayed_on: 10ms    # Debounce delay
+      - delayed_off: 10ms
+
+# ============================================================================
+# MQTT TOPIC STRUCTURE & REFERENCE
+# ============================================================================
+#
+# WATER METER TOPICS:
+#   - home/water-meter/reading     → Total consumption in m³ [retained]
+#   - home/water-meter/flow        → Current flow rate L/min [retained]
+#   - home/water-meter/signal      → RF signal received status [retained]
+#
+# BOILER TOPICS (via pyplumio):
+#   - home/boiler/temperature      → Current boiler temp in °C [retained]
+#   - home/boiler/pressure         → Current pressure in bar [retained]
+#   - home/boiler/setpoint         → Target temperature in °C [retained]
+#   - home/boiler/status           → State: "on" or "off" [retained]
+#
+# DEVICE TOPICS:
+#   - home/device/status           → "online" or "offline" [retained]
+#   - home/device/uptime           → Uptime in seconds [retained]
+#   - home/device/wifi_signal      → Signal strength in dBm [retained]
+#   - home/device/ip_address       → Device IP address [retained]
+#
+# QoS: All use QoS 1 (at least once delivery)
+# Retain: Enabled for persistent state across reconnections
+
+# ============================================================================
+# INTEGRATION NOTES & TROUBLESHOOTING
+# ============================================================================
+#
+# 1. WATER METER RF SIGNAL DECODING:
+#    - This configuration provides the RF reception framework
+#    - Actual protocol decoding depends on specific water meter model
+#    - Use software-defined radio (SDR) to capture signals from your meter
+#    - Analyze with GQRX or similar tool to determine:
+#      * Carrier frequency (868 MHz default, may need adjustment)
+#      * Modulation type (FSK, OOK, etc.)
+#      * Data rate (typical 4.8-9.6 kbps)
+#      * Packet format and checksum algorithm
+#    - Implement custom decoder in lambda functions (see esphome-cc1101.yaml)
+#
+# 2. BOILER MODBUS RTU COMMUNICATION:
+#    - RS-485 UART carries raw Modbus frames from ecoMAX boiler
+#    - ESPHome does NOT include Modbus RTU decoder
+#    - Use pyplumio Python library to handle:
+#      * Connection bridging (TCP or MQTT-based)
+#      * Modbus RTU frame parsing and CRC validation
+#      * ecoMAX-specific register mapping
+#      * Boiler data extraction (temperature, pressure, status)
+#    - Integration steps documented in esphome-rs485.yaml
+#
+# 3. DATA SYNCHRONIZATION:
+#    - Water meter: Updates when RF signal received (event-driven)
+#    - Boiler: Updates at regular intervals (pyplumio polling)
+#    - Correlate readings via timestamps in Home Assistant automations
+#
+# 4. MQTT TESTING:
+#    Subscribe to all device topics:
+#      mosquitto_sub -h 192.168.1.100 -u mqtt_user -P mqtt_pass -t "home/#" -v
+#    
+#    Subscribe to specific sensor:
+#      mosquitto_sub -h 192.168.1.100 -t "home/water-meter/reading" -v
+#
+# 5. ESPHOME VALIDATION:
+#    Before flashing, validate YAML syntax:
+#      esphome validate esphome.yaml
+#    
+#    Compile configuration:
+#      esphome compile esphome.yaml
+#
+# 6. DEBUGGING TIPS:
+#    - Check WiFi connects: logs should show "WiFi connected"
+#    - Verify MQTT broker accessibility: ping broker IP
+#    - Monitor serial output: esphome logs esphome.yaml
+#    - Check MQTT credentials in secrets.yaml match broker auth
+#    - Enable DEBUG logging for specific components if issues arise
+#    - LED blinks rapidly during boot, stays solid when connected
+#
+# 7. GPIO PIN CONFLICTS:
+#    Reserved pins (DO NOT USE):
+#    - GPIO0, GPIO2, GPIO8, GPIO9: SPI Flash internal use
+#    - GPIO20, GPIO21: UART0 console (USB)
+#    See hardware-config.md for full pin documentation
+#
+
+# ============================================================================
+# REQUIRED SECRETS.YAML ENTRIES
+# ============================================================================
+#
+# Create secrets.yaml with the following entries:
+#
+# # WiFi Configuration (MANDATORY)
+# wifi_ssid: "Your WiFi Network Name"
+# wifi_password: "Your WiFi Password"
+# fallback_ap_password: "FallbackAPPassword"
+#
+# # MQTT Configuration (MANDATORY)
+# mqtt_broker: "192.168.1.100"           # IP or hostname of MQTT broker
+# mqtt_username: "mqtt_user"              # MQTT broker username
+# mqtt_password: "mqtt_password"          # MQTT broker password
+#
+# # API Configuration (MANDATORY)
+# api_encryption_key: "base64-encoded-encryption-key"
+# api_password: "api_password"            # ESPHome API password
+#
+# # OTA Update Configuration (MANDATORY)
+# ota_password: "ota_password"            # OTA firmware update password
+#
+# # HTTP Server (OPTIONAL)
+# http_password: "http_password"          # HTTP REST API password
+#
+# Generate encryption key:
+#   python3 -c "import secrets; import base64; key = secrets.token_bytes(32); print(base64.b64encode(key).decode())"
+#
+
+# ============================================================================
+# NEXT STEPS FOR DEPLOYMENT
+# ============================================================================
+#
+# 1. Create secrets.yaml file with mandatory entries listed above
+#
+# 2. Validate YAML syntax:
+#    esphome validate esphome.yaml
+#
+# 3. Compile configuration:
+#    esphome compile esphome.yaml
+#
+# 4. Upload to ESP32-C3 device:
+#    esphome upload esphome.yaml --device /dev/ttyUSB0
+#    (or use esphome web interface for wireless upload)
+#
+# 5. Monitor device logs:
+#    esphome logs esphome.yaml
+#
+# 6. Verify WiFi connection and MQTT communication
+#
+# 7. Configure pyplumio for boiler data decoding:
+#    - Follow instructions in esphome-rs485.yaml
+#    - Set up Home Assistant add-on or Python script
+#    - Connect to ESP32 via TCP bridge on port 8899
+#
+# 8. Set up water meter RF signal decoder:
+#    - Capture and analyze meter signals with SDR
+#    - Implement custom decoder as lambda function
+#    - Test signal reception and parsing
+#
+# 9. Create Home Assistant automations:
+#    - Monitor temperature changes
+#    - Alert on high/low pressures
+#    - Track correlation between water usage and heating
+#    - Log data to database for analytics
+#
+
+# ============================================================================
+# FILE REFERENCES
+# ============================================================================
+#
+# For detailed information, refer to component-specific files:
+#
+# - esphome-cc1101.yaml:  CC1101 RF receiver configuration and notes
+# - esphome-rs485.yaml:   RS-485 UART and pyplumio integration guide
+# - esphome-mqtt.yaml:    WiFi and MQTT configuration options
+# - hardware-config.md:   Complete GPIO pin mapping and electrical specs
+# - secrets-template.yaml: Template for required secrets entries
+#
+
+# ============================================================================

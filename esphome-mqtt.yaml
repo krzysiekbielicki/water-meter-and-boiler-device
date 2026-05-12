@@ -1,0 +1,275 @@
+# ESPHome MQTT Configuration for Water Meter and Boiler Device
+# This file configures WiFi and MQTT connectivity for the ESP32-C3 device
+
+esphome:
+  name: water-meter-boiler
+  friendly_name: "Water Meter Boiler Device"
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+# ============================================================================
+# WIFI CONFIGURATION
+# ============================================================================
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: LIGHT
+  reboot_timeout: 5min
+  fast_connect: true
+  
+  # Fallback AP for provisioning
+  ap:
+    ssid: "WaterMeter-Fallback"
+    password: !secret fallback_ap_password
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+logger:
+  level: INFO
+  logs:
+    wifi: DEBUG
+    mqtt: DEBUG
+    api: WARNING
+
+# ============================================================================
+# API CONFIGURATION
+# ============================================================================
+api:
+  encryption:
+    key: !secret api_encryption_key
+  password: !secret api_password
+  reboot_timeout: 0s
+
+# ============================================================================
+# OTA UPDATE CONFIGURATION
+# ============================================================================
+ota:
+  password: !secret ota_password
+  safe_mode: true
+
+# ============================================================================
+# MQTT BROKER CONFIGURATION
+# ============================================================================
+mqtt:
+  broker: !secret mqtt_broker
+  port: 1883
+  client_id: water-meter-device
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  keepalive: 60s
+  discovery_enabled: true
+  discovery_prefix: homeassistant
+  
+  will_message:
+    topic: home/device/status
+    payload: "offline"
+    qos: 1
+    retain: true
+  
+  birth_message:
+    topic: home/device/status
+    payload: "online"
+    qos: 1
+    retain: true
+
+# ============================================================================
+# TIME COMPONENT
+# ============================================================================
+time:
+  - platform: sntp
+    timezone: UTC
+    servers:
+      - pool.ntp.org
+
+# ============================================================================
+# SENSORS
+# ============================================================================
+sensor:
+  # WiFi signal strength (dBm)
+  - platform: wifi_signal
+    name: "WiFi Signal Strength"
+    unit_of_measurement: dBm
+    entity_category: diagnostic
+    update_interval: 60s
+    filters:
+      - throttle: 60s
+
+  # Device uptime (seconds)
+  - platform: uptime
+    name: "Device Uptime"
+    unit_of_measurement: s
+    entity_category: diagnostic
+    update_interval: 60s
+    filters:
+      - throttle: 60s
+
+  # WATER METER: Consumption (m³)
+  - platform: template
+    name: "Water Consumption"
+    unit_of_measurement: "m³"
+    device_class: "water"
+    icon: "mdi:water"
+    state_class: "total_increasing"
+    update_interval: 60s
+    lambda: |-
+      return 0.0;
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/water-meter/consumption"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+  # WATER METER: Flow rate (L/min)
+  - platform: template
+    name: "Water Flow Rate"
+    unit_of_measurement: "L/min"
+    device_class: "water"
+    icon: "mdi:water-percent"
+    state_class: "measurement"
+    update_interval: 30s
+    lambda: |-
+      return 0.0;
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/water-meter/flow"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+  # BOILER: Temperature (°C)
+  - platform: template
+    name: "Boiler Temperature"
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    update_interval: 30s
+    lambda: |-
+      return 0.0;
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/boiler/temperature"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+  # BOILER: Setpoint (°C)
+  - platform: template
+    name: "Boiler Setpoint"
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    update_interval: 60s
+    lambda: |-
+      return 50.0;
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: "home/boiler/setpoint"
+            payload: !lambda 'return to_string(x);'
+            qos: 1
+            retain: true
+
+# ============================================================================
+# BINARY SENSORS
+# ============================================================================
+binary_sensor:
+  # WiFi connection info
+  - platform: wifi_info
+    ip_address:
+      name: "Device IP Address"
+      entity_category: diagnostic
+    ssid:
+      name: "Connected SSID"
+      entity_category: diagnostic
+    bssid:
+      name: "Connected BSSID"
+      entity_category: diagnostic
+
+  # BOILER: Status (on/off)
+  - platform: template
+    name: "Boiler Status"
+    device_class: "running"
+    icon: "mdi:fireplace"
+    lambda: |-
+      return false;
+    filters:
+      - throttle: 10s
+    on_state:
+      then:
+        - mqtt.publish:
+            topic: "home/boiler/status"
+            payload: !lambda 'return x ? "on" : "off";'
+            qos: 1
+            retain: true
+
+# ============================================================================
+# STATUS LED
+# ============================================================================
+status_led:
+  pin:
+    number: GPIO10
+    inverted: true
+
+# ============================================================================
+# MQTT TOPIC STRUCTURE
+# ============================================================================
+# WATER METER:
+#   - home/water-meter/consumption  → Current consumption (m³) [retained]
+#   - home/water-meter/flow         → Flow rate (L/min) [retained]
+#
+# BOILER:
+#   - home/boiler/temperature       → Current temperature (°C) [retained]
+#   - home/boiler/status            → State: "on" or "off" [retained]
+#   - home/boiler/setpoint          → Setpoint temperature (°C) [retained]
+#
+# DEVICE:
+#   - home/device/status            → "online" or "offline" [retained]
+#   - home/device/uptime            → Uptime in seconds [retained]
+#   - home/device/wifi_signal       → Signal strength dBm [retained]
+#   - home/device/ip_address        → Device IP [retained]
+#
+# All use QoS 1 (at least once delivery)
+
+# ============================================================================
+# MQTT TESTING & VERIFICATION
+# ============================================================================
+# Test MQTT connectivity with mosquitto client:
+#
+# Subscribe to all device topics:
+#   mosquitto_sub -h 192.168.1.100 -u mqtt_user -P mqtt_pass -t "home/#" -v
+#
+# Subscribe to device status:
+#   mosquitto_sub -h 192.168.1.100 -t "home/device/status" -v
+#
+# Subscribe to water meter:
+#   mosquitto_sub -h 192.168.1.100 -t "home/water-meter/consumption" -v
+#
+# Troubleshooting:
+# - Check WiFi connects first: logs should show "WiFi connected"
+# - Verify broker address and port match: mqtt_broker and port settings
+# - Check username/password in secrets.yaml match broker auth
+# - Increase logger level to DEBUG to see MQTT connection details
+# - Device LED should blink rapidly while connecting, stay solid when connected
+
+# ============================================================================
+# REQUIRED SECRETS.YAML
+# ============================================================================
+# Create secrets.yaml file with:
+#
+# wifi_ssid: "Your WiFi Network"
+# wifi_password: "Your WiFi Password"
+# fallback_ap_password: "FallbackPassword"
+# mqtt_broker: "192.168.1.100"
+# mqtt_username: "mqtt_user"
+# mqtt_password: "mqtt_password"
+# api_encryption_key: "base64-encoded-encryption-key"
+# api_password: "your_api_password"
+# ota_password: "your_ota_password"
