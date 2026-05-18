@@ -22,17 +22,17 @@ This document defines the GPIO pin assignments and hardware interface configurat
 
 | GPIO Pin | Component | Function | Interface | Notes |
 |----------|-----------|----------|-----------|-------|
-| GPIO0 | Available | - | GPIO | Can be used for general I/O |
-| GPIO1 | RS-485 (MAX3485) | TX | UART1 TX | Serial data transmission to RS-485 |
+| GPIO0 | CC1101 | GDO2 (sync word detect) | GPIO input | Asserts on sync word received |
+| GPIO1 | CC1101 | MISO (Master In, Slave Out) | SPI2 MISO | Data from CC1101 to ESP32-C3 |
 | GPIO2 | Available | - | GPIO | Can be used for general I/O |
-| GPIO3 | RS-485 (MAX3485) | RX | UART1 RX | Serial data reception from RS-485 |
-| GPIO4 | CC1101 | CS (Chip Select) | SPI2 CS | Active low |
-| GPIO5 | CC1101 | CLK (Clock) | SPI2 CLK | SPI clock signal |
-| GPIO6 | CC1101 | MISO (Master In, Slave Out) | SPI2 MISO | Data from CC1101 to ESP32-C3 |
-| GPIO7 | CC1101 | MOSI (Master Out, Slave In) | SPI2 MOSI | Data from ESP32-C3 to CC1101 |
+| GPIO3 | CC1101 | CLK (Clock) | SPI2 CLK | SPI clock signal |
+| GPIO4 | CC1101 | MOSI (Master Out, Slave In) | SPI2 MOSI | Data from ESP32-C3 to CC1101 |
+| GPIO5 | RS-485 (MAX3485) | TX | UART1 TX | Serial data transmission to RS-485 |
+| GPIO6 | RS-485 (MAX3485) | RX | UART1 RX | Serial data reception from RS-485 |
+| GPIO7 | CC1101 | GDO0 (FIFO threshold IRQ) | GPIO input | Asserts when RX FIFO threshold reached |
 | GPIO8 | WS2812 RGB LED | Data (NeoPixel) | LED | **Use for status** (conflicts with Blue LED) |
 | GPIO9 | Available | - | GPIO | Boot mode strapping - use with caution |
-| GPIO10 | Available | - | GPIO | Can be used for general I/O |
+| GPIO10 | CC1101 | CS (Chip Select) | SPI2 CS | Active low |
 | GPIO20 | Console (UART0) | RX | UART0 RX | USB serial console (reserved) |
 | GPIO21 | Console (UART0) | TX | UART0 TX | USB serial console (reserved) |
 
@@ -43,18 +43,20 @@ This document defines the GPIO pin assignments and hardware interface configurat
 ### SPI (CC1101 RF Receiver)
 | ESP32-C3 | Signal | CC1101 | Function |
 |----------|--------|--------|----------|
-| GPIO4 | CS | CSn | Chip Select |
-| GPIO5 | CLK | DCLK | Clock |
-| GPIO6 | MISO | DOUT | Data Out |
-| GPIO7 | MOSI | DIN | Data In |
+| GPIO10 | CS | CSn | Chip Select |
+| GPIO3 | CLK | DCLK | Clock |
+| GPIO1 | MISO | DOUT | Data Out |
+| GPIO4 | MOSI | DIN | Data In |
+| GPIO7 | GDO0 | GDO0 | RX FIFO threshold IRQ |
+| GPIO0 | GDO2 | GDO2 | Sync word detect |
 | 3.3V | VCC | VCC | Power |
 | GND | GND | GND | Ground |
 
 ### UART (RS-485 to Boiler)
 | ESP32-C3 | Signal | MAX3485 | Direction |
 |----------|--------|---------|-----------|
-| GPIO1 | TX | DI | Data In (from ESP) |
-| GPIO3 | RX | RO | Receiver Out (to ESP) |
+| GPIO5 | TX | DI | Data In (from ESP) |
+| GPIO6 | RX | RO | Receiver Out (to ESP) |
 | 3.3V | VCC | VCC | Power |
 | GND | GND | GND | Ground |
 | GND | - | RE | Receiver Enable |
@@ -85,10 +87,12 @@ The **ESP32-C3 Super Mini Plus** has 3 LEDs onboard:
 
 | Signal | GPIO | Direction | Notes |
 |--------|------|-----------|-------|
-| MOSI (DIN) | GPIO7 | Output | Master sends data to slave |
-| MISO (DOUT) | GPIO6 | Input | Slave sends data to master |
-| CLK (SCK) | GPIO5 | Output | SPI clock (max 10 MHz for CC1101) |
-| CS (NSS) | GPIO4 | Output | Chip select, active low |
+| MOSI (DIN) | GPIO4 | Output | Master sends data to slave |
+| MISO (DOUT) | GPIO1 | Input | Slave sends data to master |
+| CLK (SCK) | GPIO3 | Output | SPI clock (max 10 MHz for CC1101) |
+| CS (NSS) | GPIO10 | Output | Chip select, active low |
+| GDO0 | GPIO7 | Input | RX FIFO threshold interrupt |
+| GDO2 | GPIO0 | Input | Sync word detected signal |
 
 **SPI Configuration Parameters:**
 - Frequency: 5-10 MHz (CC1101 supports up to 10 MHz)
@@ -101,13 +105,13 @@ The **ESP32-C3 Super Mini Plus** has 3 LEDs onboard:
 CC1101 Pin          | Signal   | GPIO
 GND                 | GND      | GND
 VCC                 | 3.3V     | 3.3V
-1 (GND)             | GND      | GND
+1 (GDO2)            | GDO2     | GPIO0
 2 (DVCC)            | 3.3V     | 3.3V
-3 (DOUT)            | MISO     | GPIO6
-4 (DIN)             | MOSI     | GPIO7
-5 (DCLK)            | CLK      | GPIO5
-6 (CSn)             | CS       | GPIO4
-7 (GND)             | GND      | GND
+3 (DOUT)            | MISO     | GPIO1
+4 (DIN)             | MOSI     | GPIO4
+5 (DCLK)            | CLK      | GPIO3
+6 (CSn)             | CS       | GPIO10
+7 (GDO0)            | GDO0     | GPIO7
 8 (GND)             | GND      | GND
 ```
 
@@ -116,8 +120,8 @@ VCC                 | 3.3V     | 3.3V
 
 | Signal | GPIO | Direction | Notes |
 |--------|------|-----------|-------|
-| TX | GPIO1 | Output | UART transmit from ESP32-C3 |
-| RX | GPIO3 | Input | UART receive to ESP32-C3 |
+| TX | GPIO5 | Output | UART transmit from ESP32-C3 |
+| RX | GPIO6 | Input | UART receive to ESP32-C3 |
 
 **UART Configuration Parameters:**
 - Baud Rate: 9600 bps (typical for meter data)
@@ -129,10 +133,10 @@ VCC                 | 3.3V     | 3.3V
 **RS-485 Hardware Connections:**
 ```
 MAX3485 Pin         | Signal   | GPIO / Power
-1 (RO)              | Receiver Output (to data) | RX (GPIO3)
+1 (RO)              | Receiver Output (to data) | RX (GPIO6)
 2 (RE)              | Receiver Enable (active low) | GND (always enabled)
 3 (DE)              | Driver Enable (active high) | GND (always enabled for RX mode)
-4 (DI)              | Driver Input (from data) | TX (GPIO1)
+4 (DI)              | Driver Input (from data) | TX (GPIO5)
 5 (GND)             | Ground | GND
 6 (A)               | RS-485 A line | RS-485 Network A
 7 (B)               | RS-485 B line | RS-485 Network B
@@ -145,19 +149,8 @@ MAX3485 Pin         | Signal   | GPIO / Power
 - For this design: Connect RE and DE directly to GND for passive reception mode
 
 ### 3. Status LED
-**GPIO:** GPIO10  
-**Type:** Status Indicator  
-**Configuration:**
-- Active High (LED on when GPIO10 = HIGH)
-- Recommended: 220Ω resistor in series
-- Voltage: 3.3V (max 40mA per GPIO)
-- Color: Typically Red or Green (user preference)
-
-**Typical LED Circuit:**
-```
-GPIO10 ----[220Ω]----[LED+]----GND
-(cathode is connected to GND)
-```
+**GPIO:** GPIO8 (WS2812 NeoPixel)
+**Type:** Onboard RGB LED
 
 ### 4. Push Button
 **GPIO:** GPIO11  
@@ -198,12 +191,11 @@ GPIO10 ----[220Ω]----[LED+]----GND
 ## Pin Constraints & Special Considerations
 
 ### Reserved/Unavailable Pins
-- **GPIO0, GPIO2, GPIO8, GPIO9:** Connected to SPI flash IC - DO NOT USE for any other purpose
+- **GPIO8, GPIO9:** Connected to SPI flash IC - DO NOT USE for any other purpose
 - **GPIO20, GPIO21:** Reserved for UART0 (USB serial console)
 - **GPIO12-GPIO19:** Strapping pins - use with caution during boot
 
 ### Strapping Pins (ESP32-C3)
-- GPIO2: Must be LOW during boot (SPI flash mode)
 - GPIO8, GPIO9: Used for SPI flash
 - Pull-ups/pull-downs should not interfere with proper boot sequencing
 
@@ -227,13 +219,15 @@ GPIO10 ----[220Ω]----[LED+]----GND
 ```mermaid
 graph TB
     subgraph ESP["ESP32-C3 Microcontroller"]
-        GPIO1["GPIO1<br/>UART1 TX"]
-        GPIO3["GPIO3<br/>UART1 RX"]
-        GPIO4["GPIO4<br/>SPI CS"]
-        GPIO5["GPIO5<br/>SPI CLK"]
-        GPIO6["GPIO6<br/>SPI MISO"]
-        GPIO7["GPIO7<br/>SPI MOSI"]
+        GPIO0["GPIO0<br/>CC1101 GDO2"]
+        GPIO1["GPIO1<br/>SPI MISO"]
+        GPIO3["GPIO3<br/>SPI CLK"]
+        GPIO4["GPIO4<br/>SPI MOSI"]
+        GPIO5["GPIO5<br/>UART1 TX"]
+        GPIO6["GPIO6<br/>UART1 RX"]
+        GPIO7["GPIO7<br/>CC1101 GDO0"]
         GPIO8["GPIO8<br/>WS2812 RGB"]
+        GPIO10["GPIO10<br/>SPI CS"]
         PWR3V3["3.3V Power"]
         GND["GND"]
     end
@@ -257,17 +251,19 @@ graph TB
     end
     
     %% RF Connections
-    GPIO4 -->|CS| CC1101
-    GPIO5 -->|CLK| CC1101
-    GPIO6 -->|MISO| CC1101
-    GPIO7 -->|MOSI| CC1101
+    GPIO10 -->|CS| CC1101
+    GPIO3 -->|CLK| CC1101
+    GPIO1 -->|MISO| CC1101
+    GPIO4 -->|MOSI| CC1101
+    GPIO7 -->|GDO0 IRQ| CC1101
+    GPIO0 -->|GDO2 SYNC| CC1101
     PWR3V3 -->|3.3V| CC1101
     GND -->|GND| CC1101
     METER -->|RF Signal| CC1101
     
     %% RS-485 Connections
-    GPIO1 -->|TX| MAX3485
-    GPIO3 -->|RX| MAX3485
+    GPIO5 -->|TX| MAX3485
+    GPIO6 -->|RX| MAX3485
     PWR3V3 -->|3.3V| MAX3485
     GND -->|GND| MAX3485
     MAX3485 -->|A/B| RS485BUS
@@ -308,34 +304,28 @@ graph TB
 ### ESPHome YAML (GPIO Definition Reference)
 ```yaml
 esphome:
-  name: water-meter-device
+  name: water-meter-wmbus
 
-esp32_c3:
+esp32:
   board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
 
 spi:
-  clk_pin: GPIO5
-  mosi_pin: GPIO7
-  miso_pin: GPIO6
+  clk_pin: GPIO3
+  mosi_pin: GPIO4
+  miso_pin: GPIO1
+
+wmbus_radio:
+  radio_type: CC1101
+  cs_pin: GPIO10
+  irq_pin: GPIO7   # GDO0
 
 uart:
   id: uart_rs485
-  tx_pin: GPIO1
-  rx_pin: GPIO3
+  tx_pin: GPIO5
+  rx_pin: GPIO6
   baud_rate: 9600
-
-button:
-  - platform: gpio
-    pin: GPIO11
-    name: "User Button"
-    
-output:
-  - platform: gpio
-    pin: GPIO10
-    id: led_status
-    
-status_led:
-  pin: GPIO10
 ```
 
 ---
@@ -343,13 +333,14 @@ status_led:
 ## Verification Checklist
 
 - [x] All GPIO pins assigned without conflicts
-- [x] Flash memory pins (0, 2, 8, 9) reserved
+- [x] Flash memory pins (8, 9) reserved
 - [x] UART0 (20, 21) reserved for console
-- [x] SPI bus uses standard pins (4, 5, 6, 7)
+- [x] SPI bus pins documented (CLK=3, MOSI=4, MISO=1, CS=10)
+- [x] CC1101 GDO pins documented (GDO0=7, GDO2=0)
 - [x] Power supply requirements documented
 - [x] Decoupling capacitor placement specified
 - [x] Signal integrity guidelines provided
-- [x] ASCII wiring diagram included
+- [x] Wiring diagram included
 - [x] Compatible with ESP32-C3 development boards
 
 ---
@@ -373,6 +364,6 @@ status_led:
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** 2024  
-**Status:** Complete
+**Document Version:** 1.1  
+**Last Updated:** 2026-05-18  
+**Status:** Complete — reflects actual soldered hardware
