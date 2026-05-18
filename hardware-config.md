@@ -24,14 +24,14 @@ This document defines the GPIO pin assignments and hardware interface configurat
 |----------|-----------|----------|-----------|-------|
 | GPIO0 | CC1101 | GDO2 (sync word detect) | GPIO input | Asserts on sync word received |
 | GPIO1 | CC1101 | MISO (Master In, Slave Out) | SPI2 MISO | Data from CC1101 to ESP32-C3 |
-| GPIO2 | Available | - | GPIO | Can be used for general I/O |
+| GPIO2 | ❌ SPI flash | SPID (data line) | — | **DO NOT USE** — shared with flash data bus; causes crashes |
 | GPIO3 | CC1101 | CLK (Clock) | SPI2 CLK | SPI clock signal |
 | GPIO4 | CC1101 | MOSI (Master Out, Slave In) | SPI2 MOSI | Data from ESP32-C3 to CC1101 |
 | GPIO5 | RS-485 (MAX3485) | TX | UART1 TX | Serial data transmission to RS-485 |
 | GPIO6 | RS-485 (MAX3485) | RX | UART1 RX | Serial data reception from RS-485 |
 | GPIO7 | CC1101 | GDO0 (FIFO threshold IRQ) | GPIO input | Asserts when RX FIFO threshold reached |
 | GPIO8 | WS2812 RGB LED | Data (NeoPixel) | LED | **Use for status** (conflicts with Blue LED) |
-| GPIO9 | Available | - | GPIO | Boot mode strapping - use with caution |
+| GPIO9 | DS18B20 (1-Wire) | Data | 1-Wire | Strapping pin — safe with 4.7kΩ pull-up; open-drain stays HIGH at boot |
 | GPIO10 | CC1101 | CS (Chip Select) | SPI2 CS | Active low |
 | GPIO20 | Console (UART0) | RX | UART0 RX | USB serial console (reserved) |
 | GPIO21 | Console (UART0) | TX | UART0 TX | USB serial console (reserved) |
@@ -63,6 +63,15 @@ This document defines the GPIO pin assignments and hardware interface configurat
 | GND | - | DE | Driver Enable |
 | - | - | A | RS-485 Bus A |
 | - | - | B | RS-485 Bus B |
+
+### 1-Wire (DS18B20 Temperature Sensors)
+| ESP32-C3 | Signal | DS18B20 | Notes |
+|----------|--------|---------|-------|
+| GPIO9 | Data | DQ | 4.7kΩ pull-up to 3.3V required |
+| 3.3V | VCC | VDD | Power |
+| GND | GND | GND | Ground |
+
+Up to 3× DS18B20 sensors on a single bus (parasitic or external power mode).
 
 ### GPIO Outputs/Inputs (Status LEDs)
 
@@ -191,13 +200,14 @@ MAX3485 Pin         | Signal   | GPIO / Power
 ## Pin Constraints & Special Considerations
 
 ### Reserved/Unavailable Pins
-- **GPIO8, GPIO9:** Connected to SPI flash IC - DO NOT USE for any other purpose
-- **GPIO20, GPIO21:** Reserved for UART0 (USB serial console)
-- **GPIO12-GPIO19:** Strapping pins - use with caution during boot
+- **GPIO2:** Connected to SPI flash SPID (data line) — toggling during any flash read causes crashes. **DO NOT USE.**
+- **GPIO8:** Connected to SPI flash and onboard WS2812 LED — use only for NeoPixel.
+- **GPIO20, GPIO21:** Reserved for UART0 (USB serial console).
 
 ### Strapping Pins (ESP32-C3)
-- GPIO8, GPIO9: Used for SPI flash
-- Pull-ups/pull-downs should not interfere with proper boot sequencing
+- **GPIO9** is a strapping pin: LOW at reset → enters download mode (prevents normal boot).
+- DS18B20 on GPIO9 is **safe** because 1-Wire is open-drain — the 4.7kΩ pull-up holds the line HIGH at reset. No communication happens during power-on, so the boot mode strapping is unaffected.
+- OTA risk: GPIO9 is also SPI flash WP (write protect). A 1-Wire LOW pulse during an active flash write *could* interfere. OTA flashes are infrequent; in practice this is a very low risk.
 
 ### GPIO Capabilities
 - Max current per GPIO: 40 mA
@@ -227,6 +237,7 @@ graph TB
         GPIO6["GPIO6<br/>UART1 RX"]
         GPIO7["GPIO7<br/>CC1101 GDO0"]
         GPIO8["GPIO8<br/>WS2812 RGB"]
+        GPIO9["GPIO9<br/>1-Wire DS18B20"]
         GPIO10["GPIO10<br/>SPI CS"]
         PWR3V3["3.3V Power"]
         GND["GND"]
@@ -239,6 +250,10 @@ graph TB
     subgraph RS["RS-485 Bridge (Boiler)"]
         MAX3485["MAX3485<br/>RS-485 Driver"]
         RS485BUS["RS-485 Bus<br/>A/B Lines"]
+    end
+    
+    subgraph TEMP["Temperature Sensors"]
+        DS18B20["DS18B20 × 3<br/>1-Wire Bus<br/>4.7kΩ pull-up"]
     end
     
     subgraph IO["Status LEDs (Onboard)"]
@@ -269,12 +284,16 @@ graph TB
     MAX3485 -->|A/B| RS485BUS
     RS485BUS -->|Modbus RTU| BOILER
     
+    %% 1-Wire Connections
+    GPIO9 -->|1-Wire| DS18B20
+    
     %% I/O Connections
     GPIO8 -->|Data| LED
     
     style ESP fill:#4A90E2,stroke:#333,stroke-width:2px,color:#fff
     style RF fill:#50C878,stroke:#333,stroke-width:2px,color:#fff
     style RS fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#fff
+    style TEMP fill:#20B2AA,stroke:#333,stroke-width:2px,color:#fff
     style IO fill:#FFB84D,stroke:#333,stroke-width:2px,color:#fff
     style EXT fill:#9B59B6,stroke:#333,stroke-width:2px,color:#fff
 ```
@@ -326,6 +345,9 @@ uart:
   tx_pin: GPIO5
   rx_pin: GPIO6
   baud_rate: 9600
+
+dallas_temp:
+  pin: GPIO9        # 4.7kΩ pull-up to 3.3V required
 ```
 
 ---
@@ -333,10 +355,11 @@ uart:
 ## Verification Checklist
 
 - [x] All GPIO pins assigned without conflicts
-- [x] Flash memory pins (8, 9) reserved
+- [x] Flash memory pins (GPIO2 SPID, GPIO8) reserved and documented
 - [x] UART0 (20, 21) reserved for console
 - [x] SPI bus pins documented (CLK=3, MOSI=4, MISO=1, CS=10)
 - [x] CC1101 GDO pins documented (GDO0=7, GDO2=0)
+- [x] DS18B20 1-Wire assigned to GPIO9 (strapping pin safe with pull-up)
 - [x] Power supply requirements documented
 - [x] Decoupling capacitor placement specified
 - [x] Signal integrity guidelines provided
@@ -364,6 +387,6 @@ uart:
 
 ---
 
-**Document Version:** 1.1  
+**Document Version:** 1.2  
 **Last Updated:** 2026-05-18  
-**Status:** Complete — reflects actual soldered hardware
+**Status:** Complete — reflects actual soldered hardware + DS18B20 planned
